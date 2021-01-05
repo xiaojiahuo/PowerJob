@@ -3,7 +3,6 @@ package com.github.kfcfans.powerjob.server.web.controller;
 import com.github.kfcfans.powerjob.common.InstanceStatus;
 import com.github.kfcfans.powerjob.common.PowerJobException;
 import com.github.kfcfans.powerjob.common.response.ResultDTO;
-import com.github.kfcfans.powerjob.server.akka.OhMyServer;
 import com.github.kfcfans.powerjob.server.common.utils.OmsFileUtils;
 import com.github.kfcfans.powerjob.server.persistence.PageResult;
 import com.github.kfcfans.powerjob.server.persistence.StringPage;
@@ -17,8 +16,9 @@ import com.github.kfcfans.powerjob.server.service.instance.InstanceService;
 import com.github.kfcfans.powerjob.server.web.request.QueryInstanceRequest;
 import com.github.kfcfans.powerjob.server.web.response.InstanceDetailVO;
 import com.github.kfcfans.powerjob.server.web.response.InstanceInfoVO;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FileUtils;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Example;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
 import java.io.File;
+import java.net.URL;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -40,12 +41,12 @@ import java.util.stream.Collectors;
  * @author tjq
  * @since 2020/4/9
  */
+@Slf4j
 @RestController
 @RequestMapping("/instance")
 public class InstanceController {
 
-    @Value("${server.port}")
-    private int port;
+
 
     @Resource
     private InstanceService instanceService;
@@ -66,8 +67,8 @@ public class InstanceController {
     }
 
     @GetMapping("/retry")
-    public ResultDTO<Void> retryInstance(Long instanceId) {
-        instanceService.retryInstance(instanceId);
+    public ResultDTO<Void> retryInstance(String appId, Long instanceId) {
+        instanceService.retryInstance(Long.valueOf(appId), instanceId);
         return ResultDTO.success(null);
     }
 
@@ -77,31 +78,13 @@ public class InstanceController {
     }
 
     @GetMapping("/log")
-    public ResultDTO<StringPage> getInstanceLog(Long instanceId, Long index, HttpServletResponse response) {
-
-        String targetServer = getTargetServer(instanceId);
-
-        // 转发HTTP请求（如果使用Akka，则需要传输两次，而转发HTTP请求只需要传输一次"大"数据包）
-        if (!OhMyServer.getActorSystemAddress().equals(targetServer)) {
-            String ip = targetServer.split(":")[0];
-            String url = String.format("http://%s:%s/instance/log?instanceId=%d&index=%d", ip, port, instanceId, index);
-            try {
-                response.sendRedirect(url);
-                return ResultDTO.success(StringPage.simple("redirecting..."));
-            }catch (Exception e) {
-                return ResultDTO.failed(e);
-            }
-        }
-
-        return ResultDTO.success(instanceLogService.fetchInstanceLog(instanceId, index));
+    public ResultDTO<StringPage> getInstanceLog(Long appId, Long instanceId, Long index) {
+        return ResultDTO.success(instanceLogService.fetchInstanceLog(appId, instanceId, index));
     }
 
     @GetMapping("/downloadLogUrl")
-    public ResultDTO<String> getDownloadUrl(Long instanceId) {
-        String targetServer = getTargetServer(instanceId);
-        String ip = targetServer.split(":")[0];
-        String url = "http://" + ip + ":" + port + "/instance/downloadLog?instanceId=" + instanceId;
-        return ResultDTO.success(url);
+    public ResultDTO<String> getDownloadUrl(Long appId, Long instanceId) {
+        return ResultDTO.success(instanceLogService.fetchDownloadUrl(appId, instanceId));
     }
 
     @GetMapping("/downloadLog")
@@ -109,6 +92,24 @@ public class InstanceController {
 
         File file = instanceLogService.downloadInstanceLog(instanceId);
         OmsFileUtils.file2HttpResponse(file, response);
+    }
+
+    @GetMapping("/downloadLog4Console")
+    public void downloadLog4Console(Long appId, Long instanceId , HttpServletResponse response) throws Exception {
+        // 获取内部下载链接
+        String downloadUrl = instanceLogService.fetchDownloadUrl(appId, instanceId);
+        // 先下载到本机
+        String logFilePath = OmsFileUtils.genTemporaryWorkPath() + String.format("powerjob-%s-%s.log", appId, instanceId);
+        File logFile = new File(logFilePath);
+
+        try {
+            FileUtils.copyURLToFile(new URL(downloadUrl), logFile);
+
+            // 再推送到浏览器
+            OmsFileUtils.file2HttpResponse(logFile, response);
+        } finally {
+            FileUtils.forceDelete(logFile);
+        }
     }
 
     @PostMapping("/list")

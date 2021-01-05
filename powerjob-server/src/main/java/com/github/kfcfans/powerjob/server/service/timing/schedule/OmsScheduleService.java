@@ -30,10 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -136,7 +133,7 @@ public class OmsScheduleService {
 
                 // 1. 批量写日志表
                 Map<Long, Long> jobId2InstanceId = Maps.newHashMap();
-                log.info("[CronScheduler] These cron jobs will be scheduled： {}.", jobInfos);
+                log.info("[CronScheduler] These cron jobs will be scheduled: {}.", jobInfos);
 
                 jobInfos.forEach(jobInfo -> {
                     Long instanceId = instanceService.create(jobInfo.getId(), jobInfo.getAppId(), null, null, jobInfo.getNextTriggerTime());
@@ -193,7 +190,7 @@ public class OmsScheduleService {
             wfInfos.forEach(wfInfo -> {
 
                 // 1. 先生成调度记录，防止不调度的情况发生
-                Long wfInstanceId = workflowInstanceManager.create(wfInfo, null);
+                Long wfInstanceId = workflowInstanceManager.create(wfInfo, null, wfInfo.getNextTriggerTime());
 
                 // 2. 推入时间轮，准备调度执行
                 long delay = wfInfo.getNextTriggerTime() - System.currentTimeMillis();
@@ -220,6 +217,9 @@ public class OmsScheduleService {
             try {
                 // 查询所有的秒级任务（只包含ID）
                 List<Long> jobIds = jobInfoRepository.findByAppIdInAndStatusAndTimeExpressionTypeIn(partAppIds, SwitchableStatus.ENABLE.getV(), TimeExpressionType.frequentTypes);
+                if (CollectionUtils.isEmpty(jobIds)) {
+                    return;
+                }
                 // 查询日志记录表中是否存在相关的任务
                 List<Long> runningJobIdList = instanceInfoRepository.findByJobIdInAndStatusIn(jobIds, InstanceStatus.generalizedRunningStatus);
                 Set<Long> runningJobIdSet = Sets.newHashSet(runningJobIdList);
@@ -236,7 +236,10 @@ public class OmsScheduleService {
                 }
 
                 log.info("[FrequentScheduler] These frequent jobs will be scheduled： {}.", notRunningJobIds);
-                notRunningJobIds.forEach(jobId -> jobService.runJob(jobId, null, 0));
+                notRunningJobIds.forEach(jobId -> {
+                    Optional<JobInfoDO> jobInfoOpt = jobInfoRepository.findById(jobId);
+                    jobInfoOpt.ifPresent(jobInfoDO -> jobService.runJob(jobInfoDO.getAppId(), jobId, null, 0L));
+                });
             }catch (Exception e) {
                 log.error("[FrequentScheduler] schedule frequent job failed.", e);
             }

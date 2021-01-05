@@ -81,10 +81,11 @@ public class DispatchService {
         if (maxInstanceNum > 0) {
 
             // 这个 runningInstanceCount 已经包含了本 instance
+            // 不统计 WAITING_DISPATCH 的状态：使用 OpenAPI 触发的延迟任务不应该统计进去（比如 delay 是 1 天）
             long runningInstanceCount = instanceInfoRepository.countByJobIdAndStatusIn(jobId, Lists.newArrayList(WAITING_WORKER_RECEIVE.getV(), RUNNING.getV()));
             // 超出最大同时运行限制，不执行调度
             if (runningInstanceCount > maxInstanceNum) {
-                String result = String.format(SystemInstanceResult.TOO_MUCH_INSTANCE, runningInstanceCount, maxInstanceNum);
+                String result = String.format(SystemInstanceResult.TOO_MANY_INSTANCES, runningInstanceCount, maxInstanceNum);
                 log.warn("[Dispatcher-{}|{}] cancel dispatch job due to too much instance is running ({} > {}).", jobId, instanceId, runningInstanceCount, maxInstanceNum);
                 instanceInfoRepository.update4TriggerFailed(instanceId, FAILED.getV(), currentRunningTimes, current, current, RemoteConstant.EMPTY_ADDRESS, result, dbInstanceParams, now);
 

@@ -8,7 +8,7 @@ import com.github.kfcfans.powerjob.server.common.SJ;
 import com.github.kfcfans.powerjob.server.common.utils.DingTalkUtils;
 import com.github.kfcfans.powerjob.server.persistence.core.model.UserInfoDO;
 import com.github.kfcfans.powerjob.server.service.alarm.Alarm;
-import com.github.kfcfans.powerjob.server.service.alarm.Alarmable;
+import com.github.kfcfans.powerjob.server.extension.Alarmable;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
@@ -51,10 +51,14 @@ public class DingTalkAlarmService implements Alarmable {
         }
         Set<String> userIds = Sets.newHashSet();
         targetUserList.forEach(user -> {
+            String phone = user.getPhone();
+            if (StringUtils.isEmpty(phone)) {
+                return;
+            }
             try {
-                String userId = mobile2UserIdCache.get(user.getPhone(), () -> {
+                String userId = mobile2UserIdCache.get(phone, () -> {
                     try {
-                        return dingTalkUtils.fetchUserIdByMobile(user.getPhone());
+                        return dingTalkUtils.fetchUserIdByMobile(phone);
                     } catch (PowerJobException ignore) {
                         return EMPTY_TAG;
                     } catch (Exception ignore) {

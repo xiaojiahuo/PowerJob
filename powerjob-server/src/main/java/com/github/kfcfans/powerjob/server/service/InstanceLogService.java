@@ -1,10 +1,13 @@
 package com.github.kfcfans.powerjob.server.service;
 
+import com.github.kfcfans.powerjob.common.LogLevel;
 import com.github.kfcfans.powerjob.common.OmsConstant;
 import com.github.kfcfans.powerjob.common.TimeExpressionType;
 import com.github.kfcfans.powerjob.common.model.InstanceLogContent;
 import com.github.kfcfans.powerjob.common.utils.CommonUtils;
+import com.github.kfcfans.powerjob.common.utils.NetUtils;
 import com.github.kfcfans.powerjob.common.utils.SegmentLock;
+import com.github.kfcfans.powerjob.server.common.redirect.DesignateServer;
 import com.github.kfcfans.powerjob.server.common.utils.OmsFileUtils;
 import com.github.kfcfans.powerjob.server.persistence.StringPage;
 import com.github.kfcfans.powerjob.server.persistence.core.model.JobInfoDO;
@@ -21,6 +24,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.commons.lang3.time.FastDateFormat;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -44,6 +48,9 @@ import java.util.stream.Stream;
 @Slf4j
 @Service
 public class InstanceLogService {
+
+    @Value("${server.port}")
+    private int port;
 
     @Resource
     private InstanceMetadataService instanceMetadataService;
@@ -99,11 +106,13 @@ public class InstanceLogService {
 
     /**
      * 获取任务实例运行日志（默认存在本地数据，需要由生成完成请求的路由与转发）
+     * @param appId appId，AOP 专用
      * @param instanceId 任务实例ID
      * @param index 页码，从0开始
      * @return 文本字符串
      */
-    public StringPage fetchInstanceLog(Long instanceId, long index) {
+    @DesignateServer(appIdParameterName = "appId")
+    public StringPage fetchInstanceLog(Long appId, Long instanceId, Long index) {
         try {
             Future<File> fileFuture = prepareLogFile(instanceId);
             // 超时并不会打断正在执行的任务
@@ -125,7 +134,7 @@ public class InstanceLogService {
                     ++lines;
                 }
             }catch (Exception e) {
-                log.warn("[InstanceLog-{}] read logFile from disk failed.", instanceId, e);
+                log.warn("[InstanceLog-{}] read logFile from disk failed for app: {}.", instanceId, appId, e);
                 return StringPage.simple("oms-server execution exception, caused by " + ExceptionUtils.getRootCauseMessage(e));
             }
 
@@ -138,6 +147,19 @@ public class InstanceLogService {
             log.warn("[InstanceLog-{}] fetch instance log failed.", instanceId, e);
             return StringPage.simple("oms-server execution exception, caused by " + ExceptionUtils.getRootCauseMessage(e));
         }
+    }
+
+    /**
+     * 获取日志的下载链接
+     * @param appId AOP 专用
+     * @param instanceId 任务实例 ID
+     * @return 下载链接
+     */
+    @DesignateServer(appIdParameterName = "appId")
+    public String fetchDownloadUrl(Long appId, Long instanceId) {
+        String url = "http://" + NetUtils.getLocalHost() + ":" + port + "/instance/downloadLog?instanceId=" + instanceId;
+        log.info("[InstanceLog-{}] downloadURL for appId[{}]: {}", instanceId, appId, url);
+        return url;
     }
 
     /**
@@ -299,12 +321,16 @@ public class InstanceLogService {
 
 
     /**
-     * 拼接日志 -> 2020-04-29 22:07:10.059 192.168.1.1:2777 INFO XXX
+     * 拼接日志 -> 2020-04-29 22:07:10.059 [192.168.1.1:2777] INFO XXX
      * @param instanceLog 日志对象
      * @return 字符串
      */
     private static String convertLog(LocalInstanceLogDO instanceLog) {
-        return String.format("%s [%s] -%s", dateFormat.format(instanceLog.getLogTime()), instanceLog.getWorkerAddress(), instanceLog.getLogContent());
+        return String.format("%s [%s] %s %s",
+                dateFormat.format(instanceLog.getLogTime()),
+                instanceLog.getWorkerAddress(),
+                LogLevel.genLogLevelString(instanceLog.getLogLevel()),
+                instanceLog.getLogContent());
     }
 
 

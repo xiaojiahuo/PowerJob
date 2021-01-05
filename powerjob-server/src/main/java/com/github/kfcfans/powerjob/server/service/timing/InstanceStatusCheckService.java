@@ -60,7 +60,7 @@ public class InstanceStatusCheckService {
     private WorkflowInstanceInfoRepository workflowInstanceInfoRepository;
 
     @Async("omsTimingPool")
-    @Scheduled(fixedRate = 10000)
+    @Scheduled(fixedDelay = 10000)
     public void timingStatusCheck() {
         Stopwatch stopwatch = Stopwatch.createStarted();
 
@@ -115,7 +115,7 @@ public class InstanceStatusCheckService {
             threshold = System.currentTimeMillis() - RECEIVE_TIMEOUT_MS;
             List<InstanceInfoDO> waitingWorkerReceiveInstances = instanceInfoRepository.findByAppIdInAndStatusAndActualTriggerTimeLessThan(partAppIds, InstanceStatus.WAITING_WORKER_RECEIVE.getV(), threshold);
             if (!CollectionUtils.isEmpty(waitingWorkerReceiveInstances)) {
-                log.warn("[InstanceStatusChecker] instances({}) didn't receive any reply from worker.", waitingWorkerReceiveInstances);
+                log.warn("[InstanceStatusChecker] find one instance didn't receive any reply from worker, try to redispatch: {}", waitingWorkerReceiveInstances);
                 waitingWorkerReceiveInstances.forEach(instance -> {
                     // 重新派发
                     JobInfoDO jobInfoDO = jobInfoRepository.findById(instance.getJobId()).orElseGet(JobInfoDO::new);
@@ -162,7 +162,7 @@ public class InstanceStatusCheckService {
         // 重试长时间处于 WAITING 状态的工作流实例
         long threshold = System.currentTimeMillis() - WORKFLOW_WAITING_TIMEOUT_MS;
         Lists.partition(allAppIds, MAX_BATCH_NUM).forEach(partAppIds -> {
-            List<WorkflowInstanceInfoDO> waitingWfInstanceList = workflowInstanceInfoRepository.findByAppIdInAndStatusAndGmtModifiedBefore(partAppIds, WorkflowInstanceStatus.WAITING.getV(), new Date(threshold));
+            List<WorkflowInstanceInfoDO> waitingWfInstanceList = workflowInstanceInfoRepository.findByAppIdInAndStatusAndExpectedTriggerTimeLessThan(partAppIds, WorkflowInstanceStatus.WAITING.getV(), threshold);
             if (!CollectionUtils.isEmpty(waitingWfInstanceList)) {
 
                 List<Long> wfInstanceIds = waitingWfInstanceList.stream().map(WorkflowInstanceInfoDO::getWfInstanceId).collect(Collectors.toList());
